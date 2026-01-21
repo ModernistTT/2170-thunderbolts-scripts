@@ -227,12 +227,31 @@ Set-FirewallPolicy
 
 # Security Policies
 function Set-PasswordPolicy {
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "MinimumPasswordLength" -Value $MINPWLEN
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "MaximumPasswordAge" -Value $MAXPWAGE
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "MinimumPasswordAge" -Value $MINPWAGE
-    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "PasswordHistorySize" -Value $PWHIST
-	Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "PasswordHistorySize" -Value $PWHIST
-	Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "ClearTextPassword" -Value 0
+	# Configure length, age, and history
+	net accounts /minpwlen:$MINPWLEN | Out-Null
+	if ($LASTEXITCODE -ne 0) { throw "Failed to set minimum password length" }
+	net accounts /maxpwage:$MAXPWAGE | Out-Null
+	if ($LASTEXITCODE -ne 0) { throw "Failed to set maximum password age" }
+	net accounts /minpwage:$MINPWAGE | Out-Null
+	if ($LASTEXITCODE -ne 0) { throw "Failed to set minimum password age" }
+	net accounts /uniquepw:$PWHIST | Out-Null
+	if ($LASTEXITCODE -ne 0) { throw "Failed to set password history" }
+
+	# Configure settings with secedit
+	secedit /export /cfg "$env:TEMP\secpol.cfg" | Out-Null
+	if (-not (Test-Path "$env:TEMP\secpol.cfg")) {
+		throw "Failed to export security policy"
+	}
+
+	$content = Get-Content "$env:TEMP\secpol.cfg"
+	$content = $content -replace "PasswordComplexity = .*", "PasswordComplexity = 1"
+	$content = $content -replace "ClearTextPassword = .*", "ClearTextPassword = 0"
+	$content | Set-Content "$env:TEMP\secpol_modified.cfg"
+
+	secedit /configure /db secedit.sdb /cfg "$env:TEMP\secpol_modified.cfg" /areas SECURITYPOLICY | Out-Null
+	Remove-Item "$env:TEMP\secpol.cfg" -ErrorAction SilentlyContinue
+	Remove-Item "$env:TEMP\secpol_modified.cfg" -ErrorAction SilentlyContinue
+		
 	Write-Host "Password policy configured successfully."
 }
 Set-PasswordPolicy
