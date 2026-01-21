@@ -336,6 +336,8 @@ Set-AuditPolicy
 # Check User Rights
 function Check-UserRightsAssignment {
 	try {
+		Write-Host "`nScanning User Rights Assignments for security issues..."
+		
 		secedit /export /cfg "$env:TEMP\secpol_rights.cfg" /quiet | Out-Null
 		
 		if (-not (Test-Path "$env:TEMP\secpol_rights.cfg")) {
@@ -345,7 +347,7 @@ function Check-UserRightsAssignment {
 		$content = Get-Content "$env:TEMP\secpol_rights.cfg"
 		
 		# List of sensitive rights
-		$rights = @{
+		$sensitiveRights = @{
 			"SeDebugPrivilege" = "Debug programs"
 			"SeTakeOwnershipPrivilege" = "Take ownership of files or other objects"
 			"SeLoadDriverPrivilege" = "Load and unload device drivers"
@@ -399,7 +401,8 @@ function Check-UserRightsAssignment {
 				$rightName = $matches[1]
 				$assignedTo = $matches[2]
 
-				$accounts = $assignedTo -split ','
+				if ($sensitiveRights.ContainsKey($rightName)) {
+					$accounts = $assignedTo -split ','
 					
 					foreach ($account in $accounts) {
 						$account = $account.Trim()
@@ -567,6 +570,7 @@ function Check-UserRightsAssignment {
 		}
 		
 		Remove-Item "$env:TEMP\secpol_rights.cfg" -ErrorAction SilentlyContinue
+		
 	} catch {
 		Write-Host "Failed to check User Rights Assignments. Error: $_"
 		Remove-Item "$env:TEMP\secpol_rights.cfg" -ErrorAction SilentlyContinue
@@ -574,3 +578,6 @@ function Check-UserRightsAssignment {
 	}
 }
 Check-UserRightsAssignment
+
+# Check for passwords
+# TBA 
