@@ -77,7 +77,7 @@ foreach ($line in $users) {
 	}
 }
 
-# Scan the database of users, remove them if they are not AUTHORIZED
+# Scan the database of users, remove them if they are not authorized
 try {
 	$localusers = Get-LocalUser
 } catch {
@@ -273,7 +273,7 @@ function Set-FirewallPolicy {
 		# Check if any profile is disabled
 		if (-not $domainProfile -or -not $privateProfile -or -not $publicProfile) {
 			do {
-				$answer = Read-Host "`nOne or more firewall profiles are disabled. Enable all profiles? Y/N"
+				$answer = Read-Host "One or more firewall profiles are disabled. Enable all profiles? Y/N"
 				$answer = $answer.ToLower()
 				
 				if ($answer -ne "y" -and $answer -ne "n") {
@@ -313,7 +313,7 @@ function Set-FirewallPolicy {
 				Write-Host "Firewall will remain in current state."
 			}
 		} else {
-			Write-Host "`nAll firewall profiles are already enabled."
+			Write-Host "All firewall profiles are already enabled."
 			
 			try {
 				# Still ensure service is configured properly
@@ -339,7 +339,6 @@ function Set-FirewallPolicy {
 }
 Set-FirewallPolicy
 
-# Security Policies
 function Set-PasswordPolicy {
 	try {
 		Write-Host "`nConfiguring password policy..."
@@ -568,7 +567,7 @@ function Check-UserRightsAssignment {
 		
 		# Report and handle each finding
 		if ($issues.Count -gt 0) {
-			Write-Host "`nWARNING: Found $($issues.Count) potential security issue(s) in User Rights Assignments:" -ForegroundColor Yellow
+			Write-Host "WARNING: Found $($issues.Count) potential security issue(s) in User Rights Assignments:" -ForegroundColor Yellow
 			Write-Host ""
 			
 			$accountsToRemove = @{}  # Dictionary: RightName -> Array of accounts to remove
