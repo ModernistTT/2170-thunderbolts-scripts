@@ -326,13 +326,6 @@ function Set-FirewallPolicy {
 				Write-Host "Failed to configure firewall service. Error: $_"
 			}
 		}
-		
-		# Verify Windows Firewall service status
-		$service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
-		if ($service) {
-			Write-Host "Windows Firewall Service Status: $($service.Status)"
-			Write-Host "Windows Firewall Service Startup Type: $($service.StartType)"
-		}
 	} catch {
 		Write-Host "Failed to check firewall status. Error: $_"
 	}
@@ -568,7 +561,6 @@ function Check-UserRightsAssignment {
 		# Report and handle each finding
 		if ($issues.Count -gt 0) {
 			Write-Host "WARNING: Found $($issues.Count) potential security issue(s) in User Rights Assignments:" -ForegroundColor Yellow
-			Write-Host ""
 			
 			$accountsToRemove = @{}  # Dictionary: RightName -> Array of accounts to remove
 			
