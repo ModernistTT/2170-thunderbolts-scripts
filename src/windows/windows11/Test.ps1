@@ -44,222 +44,228 @@ try {
 	exit
 }
 
-# Look for each user in the database, ask to add them if they are not present
-Write-Host "Verifying all authorized users are present..."
-foreach ($line in $users) {
-	$username = Get-LocalUser -Name $line -ErrorAction SilentlyContinue
-	if (-not $username) {
-		do {
-			$answer = Read-Host "User '$line' not a current user. Would you like to add them? Y/N"
-			$answer = $answer.toLower()
-
-			switch ($answer) {
-				"y" {
-					try {
-						New-LocalUser -Name $line -password $securepassword -Description "added by script"
-						Add-LocalGroupMember -Group "Users" -Member $line
-						Write-Host "User '$line' created."
-					} catch {
-						Write-Host "Failed to add user. Error: $_"
+function Configure-Users {	
+	# Look for each user in the database, ask to add them if they are not present
+	Write-Host "Verifying all authorized users are present..."
+	foreach ($line in $users) {
+		$username = Get-LocalUser -Name $line -ErrorAction SilentlyContinue
+		if (-not $username) {
+			do {
+				$answer = Read-Host "User '$line' not a current user. Would you like to add them? Y/N"
+				$answer = $answer.toLower()
+	
+				switch ($answer) {
+					"y" {
+						try {
+							New-LocalUser -Name $line -password $securepassword -Description "added by script"
+							Add-LocalGroupMember -Group "Users" -Member $line
+							Write-Host "User '$line' created."
+						} catch {
+							Write-Host "Failed to add user. Error: $_"
+						}
+						break
 					}
-					break
-				}
-				"n" {
-					Write-Host "Not adding user."
-					break
-				}
-				default {
-					Write-Host "Please input a valid answer (Y/N)!"
-					$answer = $null
-				}
-			}
-		} while ($answer -ne "y" -and $answer -ne "n")
-	}
-}
-
-# Scan the database of users, remove them if they are not authorized
-try {
-	$localusers = Get-LocalUser
-} catch {
-	Write-Host "Failed to retrieve local users. Error: $_"
-	exit
-}
-
-Write-Host "Verifying all users on the PC are authorized..."
-foreach ($user in $localusers) {
-	if ((-not($users -contains $user.Name)) -and ($user.enabled -eq $true) -and ($user.Name -notin $DEFAULTUSERS)) {
-		do {
-			$answer = Read-Host "User '$($user.Name)' is not an authorized user. Disable? Y/N"
-			$answer = $answer.toLower()
-
-			switch ($answer) {
-				"y" {
-					try {
-						Disable-LocalUser -Name $user.Name
-						Write-Host "User '$($user.Name)' disabled."
-					} catch {
-						Write-Host "Failed to disable user. Error: $_"
+					"n" {
+						break
 					}
-					break
+					default {
+						Write-Host "Please input a valid answer (Y/N)!"
+						$answer = $null
+					}
 				}
-				"n" {
-					Write-Host "Not disabling user."
-					break
-				}
-				default {
-					Write-Host "Please input a valid answer (Y/N)!"
-					$answer = $null
-				}
-			}
-		} while ($answer -ne "y" -and $answer -ne "n")
-	}
-}
-
-# Check and disable default accounts
-Write-Host "`nChecking default accounts..."
-foreach ($defaultUser in $DEFAULTUSERS) {
-	$user = Get-LocalUser -Name $defaultUser -ErrorAction SilentlyContinue
-	if ($user -and $user.Enabled) {
-		Write-Host "Default account '$defaultUser' is enabled. Disabling..."
-		try {
-			Disable-LocalUser -Name $defaultUser
-			Write-Host "Default account '$defaultUser' disabled."
-		} catch {
-			Write-Host "Failed to disable default account '$defaultUser'. Error: $_"
+			} while ($answer -ne "y" -and $answer -ne "n")
 		}
 	}
-}
-
-# Verify Administrators
-do {
-	$answer = Read-Host "`nThis script can verify Administrators. To do so, you will need a separate text file containing authorized Administrators. Would you like to proceed? Y/N"
-	$answer = $answer.toLower()
 	
-	if ($answer -ne "y" -and $answer -ne "n") {
-		Write-Host "Please input a valid answer (Y/N)!"
-	}
-} while ($answer -ne "y" -and $answer -ne "n")
-
-if ($answer -eq "y") {
-	$path = Read-Host "Please enter the file path to your text file containing Administrators (include the filename) or type 'cancel' to cancel"
-	
-	while ((([string]::IsNullOrWhitespace($path)) -or (-not (Test-Path $path))) -and ($path -ne "cancel")) {
-		Write-Host "Invalid path. Please enter again."
-		$path = Read-Host "Please enter the file path your text file containing Administrator (include the filename) or type 'cancel' to cancel"
+	# Scan the database of users, remove them if they are not authorized
+	try {
+		$localusers = Get-LocalUser
+	} catch {
+		Write-Host "Failed to retrieve local users. Error: $_"
+		exit
 	}
 	
-	if ($path -ne "cancel") {
-		try {
-			secedit /export /cfg "$env:TEMP\secpol_check.cfg" /quiet | Out-Null
-			$administrators = Get-Content -Path $path
-			$localadministrators = Get-LocalGroupMember -Group "Administrators" | ForEach-Object { 
-				($_).Name -split '\\' | Select-Object -Last 1
+	Write-Host "Verifying all users on the PC are authorized..."
+	foreach ($user in $localusers) {
+		if ((-not($users -contains $user.Name)) -and ($user.enabled -eq $true) -and ($user.Name -notin $DEFAULTUSERS)) {
+			do {
+				$answer = Read-Host "User '$($user.Name)' is not an authorized user. Disable? Y/N"
+				$answer = $answer.toLower()
+	
+				switch ($answer) {
+					"y" {
+						try {
+							Disable-LocalUser -Name $user.Name
+							Write-Host "User '$($user.Name)' disabled."
+						} catch {
+							Write-Host "Failed to disable user. Error: $_"
+						}
+						break
+					}
+					"n" {
+						break
+					}
+					default {
+						Write-Host "Please input a valid answer (Y/N)!"
+						$answer = $null
+					}
+				}
+			} while ($answer -ne "y" -and $answer -ne "n")
+		}
+	}
+	
+	# Check and disable default accounts
+	Write-Host "`nChecking default accounts..."
+	foreach ($defaultUser in $DEFAULTUSERS) {
+		$user = Get-LocalUser -Name $defaultUser -ErrorAction SilentlyContinue
+		if ($user -and $user.Enabled) {
+			Write-Host "Default account '$defaultUser' is enabled. Disabling..."
+			try {
+				Disable-LocalUser -Name $defaultUser
+				Write-Host "Default account '$defaultUser' disabled."
+			} catch {
+				Write-Host "Failed to disable default account '$defaultUser'. Error: $_"
 			}
+		}
+	}
+	Write-Host "Ending user management."
+}
+Configure-Users
+
+function Configure-Administrators {
+	# Verify Administrators
+	do {
+		$answer = Read-Host "`nThis script can verify Administrators. To do so, you will need a separate text file containing authorized Administrators. Would you like to proceed? Y/N"
+		$answer = $answer.toLower()
 		
-			if (Test-Path "$env:TEMP\secpol_check.cfg") {
-				$content = Get-Content "$env:TEMP\secpol_check.cfg"
-				$adminNameLine = $content | Where-Object { $_ -match "NewAdministratorName" }
+		if ($answer -ne "y" -and $answer -ne "n") {
+			Write-Host "Please input a valid answer (Y/N)!"
+		}
+	} while ($answer -ne "y" -and $answer -ne "n")
+	
+	if ($answer -eq "y") {
+		$path = Read-Host "Please enter the file path to your text file containing Administrators (include the filename) or type 'cancel' to cancel"
 		
-				if ($adminNameLine -and $adminNameLine -match 'NewAdministratorName\s*=\s*"(.+)"') {
-					$currentAdminName = $matches[1]
-		
-					if ($currentAdminName -ne "Administrator") {
-						Write-Host "WARNING - The built-in Administrator account has been renamed to '$currentAdminName'"
-						do {
-							$answer = Read-Host "Would you like to rename it back to 'Administrator'? Y/N"
-							$answer = $answer.ToLower()
+		while ((([string]::IsNullOrWhitespace($path)) -or (-not (Test-Path $path))) -and ($path -ne "cancel")) {
+			Write-Host "Invalid path. Please enter again."
+			$path = Read-Host "Please enter the file path your text file containing Administrator (include the filename) or type 'cancel' to cancel"
+		}
+
+		if ($path -ne "cancel") {
+			try {
+				secedit /export /cfg "$env:TEMP\secpol_check.cfg" /quiet | Out-Null
+				$administrators = Get-Content -Path $path
+				$localadministrators = Get-LocalGroupMember -Group "Administrators" | ForEach-Object { 
+					($_).Name -split '\\' | Select-Object -Last 1
+				}
+			
+				if (Test-Path "$env:TEMP\secpol_check.cfg") {
+					$content = Get-Content "$env:TEMP\secpol_check.cfg"
+					$adminNameLine = $content | Where-Object { $_ -match "NewAdministratorName" }
+			
+					if ($adminNameLine -and $adminNameLine -match 'NewAdministratorName\s*=\s*"(.+)"') {
+						$currentAdminName = $matches[1]
+			
+						if ($currentAdminName -ne "Administrator") {
+							Write-Host "WARNING - The built-in Administrator account has been renamed to '$currentAdminName'"
+							do {
+								$answer = Read-Host "Would you like to rename it back to 'Administrator'? Y/N"
+								$answer = $answer.ToLower()
+								
+								if ($answer -ne "y" -and $answer -ne "n") {
+									Write-Host "Please input a valid answer (Y/N)!"
+								}
+							} while ($answer -ne "y" -and $answer -ne "n")
 							
-							if ($answer -ne "y" -and $answer -ne "n") {
-								Write-Host "Please input a valid answer (Y/N)!"
-							}
-						} while ($answer -ne "y" -and $answer -ne "n")
-						
-						if ($answer -eq "y") {
-							try {
-								Rename-LocalUser -Name $currentAdminName -NewName "Administrator"
-								Write-Host "Administrator account renamed successfully."
-								$DEFAULTUSERS = @("Administrator","Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
-							} catch {
-								Write-Host "Failed to rename Administrator account. Error: $_"
-								Write-Host "Updating default users list to use '$currentAdminName' instead."
+							if ($answer -eq "y") {
+								try {
+									Rename-LocalUser -Name $currentAdminName -NewName "Administrator"
+									Write-Host "Administrator account renamed successfully."
+									$DEFAULTUSERS = @("Administrator","Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
+								} catch {
+									Write-Host "Failed to rename Administrator account. Error: $_"
+									Write-Host "Updating default users list to use '$currentAdminName' instead."
+									$DEFAULTUSERS = @($currentAdminName,"Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
+								}
+							} else {
+								Write-Host "Administrator account will remain as '$currentAdminName'."
+								Write-Host "Updating checks to use '$currentAdminName' instead of 'Administrator'."
 								$DEFAULTUSERS = @($currentAdminName,"Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
 							}
-						} else {
-							Write-Host "Administrator account will remain as '$currentAdminName'."
-							Write-Host "Updating checks to use '$currentAdminName' instead of 'Administrator'."
-							$DEFAULTUSERS = @($currentAdminName,"Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
 						}
 					}
+					Remove-Item "$env:TEMP\secpol_check.cfg" -ErrorAction SilentlyContinue
 				}
-				Remove-Item "$env:TEMP\secpol_check.cfg" -ErrorAction SilentlyContinue
-			}
-		} catch {
-			Write-Host "WARNING - Could not check Administrator account name!"
-		}
-		
-		if ($administrators -and $localadministrators) {
-			Write-Host "Verifying all authorized Administrators have privileges..."
-			foreach ($line in $administrators) {
-				if ($line -notin $localadministrators) {
-					do {
-						$answer = Read-Host "User '$line' does not have privileges. Would you like to add them? Y/N"
-						$answer = $answer.toLower()
-						
-						switch ($answer) {
-							"y" {
-								try {
-									Add-LocalGroupMember -Group "Administrators" -Member $line
-									Write-Host "User '$line' added to Administrators."
-								} catch {
-									Write-Host "Failed to add administrator privileges. Error: $_"
-								}
-								break
-							}
-							"n" {
-								Write-Host "Not adding privileges for user."
-								break
-							}
-							default {
-								Write-Host "Please input a valid answer (Y/N)!"
-								$answer = $null
-							}
-						}
-					} while ($answer -ne "y" -and $answer -ne "n")
-				}
+			} catch {
+				Write-Host "WARNING - Could not check Administrator account name!"
 			}
 			
-			Write-Host "Verifying all Administrators on the PC are authorized..."
-			foreach ($admin in $localadministrators) {		
-				if (-not($administrators -contains $admin) -and ($admin -notin $DEFAULTUSERS)) {
-					do {
-						$answer = Read-Host "User '$admin' is not an authorized Administrator. Remove? Y/N"
-						$answer = $answer.toLower()
-
-						switch ($answer) {
-							"y" {
-								try {
-									Remove-LocalGroupMember -Group "Administrators" -Member $admin
-									Write-Host "User '$admin' removed from Administrators."
-								} catch {
-									Write-Host "Failed to remove administrator privileges. Error: $_"
+			if ($administrators -and $localadministrators) {
+				Write-Host "Verifying all authorized Administrators have privileges..."
+				foreach ($line in $administrators) {
+					if ($line -notin $localadministrators) {
+						do {
+							$answer = Read-Host "User '$line' does not have privileges. Would you like to add them? Y/N"
+							$answer = $answer.toLower()
+							
+							switch ($answer) {
+								"y" {
+									try {
+										Add-LocalGroupMember -Group "Administrators" -Member $line
+										Write-Host "User '$line' added to Administrators."
+									} catch {
+										Write-Host "Failed to add administrator privileges. Error: $_"
+									}
+									break
 								}
-								break
+								"n" {
+									Write-Host "Not adding privileges for user."
+									break
+								}
+								default {
+									Write-Host "Please input a valid answer (Y/N)!"
+									$answer = $null
+								}
 							}
-							"n" {
-								Write-Host "Not removing user."
-								break
+						} while ($answer -ne "y" -and $answer -ne "n")
+					}
+				}
+				
+				Write-Host "Verifying all Administrators on the PC are authorized..."
+				foreach ($admin in $localadministrators) {		
+					if (-not($administrators -contains $admin) -and ($admin -notin $DEFAULTUSERS)) {
+						do {
+							$answer = Read-Host "User '$admin' is not an authorized Administrator. Remove? Y/N"
+							$answer = $answer.toLower()
+	
+							switch ($answer) {
+								"y" {
+									try {
+										Remove-LocalGroupMember -Group "Administrators" -Member $admin
+										Write-Host "User '$admin' removed from Administrators."
+									} catch {
+										Write-Host "Failed to remove administrator privileges. Error: $_"
+									}
+									break
+								}
+								"n" {
+									Write-Host "Not removing user."
+									break
+								}
+								default {
+									Write-Host "Please input a valid answer (Y/N)!"
+									$answer = $null
+								}
 							}
-							default {
-								Write-Host "Please input a valid answer (Y/N)!"
-								$answer = $null
-							}
-						}
-					} while ($answer -ne "y" -and $answer -ne "n")
+						} while ($answer -ne "y" -and $answer -ne "n")
+					}
 				}
 			}
 		}
 	}
+	Write_host "Administrator configuration complete."
 }
+Configure-Administrators
 
 function Set-FirewallPolicy {
 	try {
@@ -588,7 +594,6 @@ function Check-UserRightsAssignment {
 				} else {
 					Write-Host "    Keeping assignment."
 				}
-				Write-Host ""
 			}
 			
 			# Apply removals if any were marked
