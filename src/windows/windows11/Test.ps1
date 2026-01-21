@@ -332,3 +332,245 @@ function Set-AuditPolicy {
 	Write-Host "Audit policy configured successfully."
 }
 Set-AuditPolicy
+
+# Check User Rights
+function Check-UserRightsAssignment {
+	try {
+		secedit /export /cfg "$env:TEMP\secpol_rights.cfg" /quiet | Out-Null
+		
+		if (-not (Test-Path "$env:TEMP\secpol_rights.cfg")) {
+			throw "Failed to export security policy"
+		}
+		
+		$content = Get-Content "$env:TEMP\secpol_rights.cfg"
+		
+		# List of sensitive rights
+		$rights = @{
+			"SeDebugPrivilege" = "Debug programs"
+			"SeTakeOwnershipPrivilege" = "Take ownership of files or other objects"
+			"SeLoadDriverPrivilege" = "Load and unload device drivers"
+			"SeBackupPrivilege" = "Back up files and directories"
+			"SeRestorePrivilege" = "Restore files and directories"
+			"SeSecurityPrivilege" = "Manage auditing and security log"
+			"SeSystemEnvironmentPrivilege" = "Modify firmware environment values"
+			"SeImpersonatePrivilege" = "Impersonate a client after authentication"
+			"SeCreateTokenPrivilege" = "Create a token object"
+			"SeTcbPrivilege" = "Act as part of the operating system"
+			"SeShutdownPrivilege" = "Shut down the system"
+			"SeRemoteShutdownPrivilege" = "Force shutdown from a remote system"
+			"SeInteractiveLogonRight" = "Allow log on locally"
+			"SeNetworkLogonRight" = "Access this computer from the network"
+			"SeRemoteInteractiveLogonRight" = "Allow log on through Remote Desktop Services"
+			"SeBatchLogonRight" = "Log on as a batch job"
+			"SeServiceLogonRight" = "Log on as a service"
+		}
+		
+		# Standard groups that are typically safe (built-in groups)
+		$safeGroups = @(
+			"*S-1-5-32-544",  # Administrators
+			"*S-1-5-32-545",  # Users
+			"*S-1-5-32-546",  # Guests
+			"*S-1-5-32-547",  # Power Users
+			"*S-1-5-32-551",  # Backup Operators
+			"*S-1-5-32-568",  # IIS_IUSRS
+			"*S-1-5-11",       # Authenticated Users
+			"*S-1-5-19",       # Local Service
+			"*S-1-5-20",       # Network Service
+			"*S-1-5-6",        # Service
+			"*S-1-1-0",        # Everyone
+			"*S-1-5-4"         # Interactive
+		)
+		
+		$issues = @()
+		$inPrivilegeSection = $false
+		$modificationsNeeded = $false
+
+		foreach ($line in $content) {
+			if ($line -match "^\[Privilege Rights\]") {
+				$inPrivilegeSection = $true
+				continue
+			}
+
+			if ($line -match "^\[.*\]" -and $line -notmatch "^\[Privilege Rights\]") {
+				$inPrivilegeSection = $false
+			}
+
+			if ($inPrivilegeSection -and $line -match "^(\w+)\s*=\s*(.+)") {
+				$rightName = $matches[1]
+				$assignedTo = $matches[2]
+
+				$accounts = $assignedTo -split ','
+					
+					foreach ($account in $accounts) {
+						$account = $account.Trim()
+						
+						# Check if it's a SID (starts with *S-1-)
+						if ($account -match '^\*S-1-') {
+							# Check if it's NOT a standard safe group SID
+							$isSafeGroup = $false
+							foreach ($safeGroup in $safeGroups) {
+								if ($account -like $safeGroup) {
+									$isSafeGroup = $true
+									break
+								}
+							}
+							
+							if (-not $isSafeGroup) {
+								# Try to resolve the SID to a name
+								try {
+									$sid = $account.TrimStart('*')
+									$objSID = New-Object System.Security.Principal.SecurityIdentifier($sid)
+									$objUser = $objSID.Translate([System.Security.Principal.NTAccount])
+									$accountName = $objUser.Value
+									
+									$issues += [PSCustomObject]@{
+										Right = $sensitiveRights[$rightName]
+										RightName = $rightName
+										AssignedTo = $accountName
+										AssignedToSID = $account
+										Type = "Individual User or Custom Group"
+									}
+								} catch {
+									$issues += [PSCustomObject]@{
+										Right = $sensitiveRights[$rightName]
+										RightName = $rightName
+										AssignedTo = $account
+										AssignedToSID = $account
+										Type = "Unknown SID"
+									}
+								}
+							}
+						} elseif ($account -notmatch '^\*S-1-') {
+							# Direct username (not a SID) - this is a red flag
+							$issues += [PSCustomObject]@{
+								Right = $sensitiveRights[$rightName]
+								RightName = $rightName
+								AssignedTo = $account
+								AssignedToSID = $null
+								Type = "Individual Username"
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		# Report and handle each finding
+		if ($issues.Count -gt 0) {
+			Write-Host "`nWARNING: Found $($issues.Count) potential security issue(s) in User Rights Assignments:" -ForegroundColor Yellow
+			Write-Host ""
+			
+			$accountsToRemove = @{}  # Dictionary: RightName -> Array of accounts to remove
+			
+			foreach ($issue in $issues) {
+				Write-Host "  Right: $($issue.Right)" -ForegroundColor Yellow
+				Write-Host "    Assigned to: $($issue.AssignedTo) [$($issue.Type)]" -ForegroundColor Red
+				
+				do {
+					$answer = Read-Host "    Remove this assignment? Y/N"
+					$answer = $answer.ToLower()
+					
+					if ($answer -ne "y" -and $answer -ne "n") {
+						Write-Host "    Please input a valid answer (Y/N)!"
+					}
+				} while ($answer -ne "y" -and $answer -ne "n")
+				
+				if ($answer -eq "y") {
+					if (-not $accountsToRemove.ContainsKey($issue.RightName)) {
+						$accountsToRemove[$issue.RightName] = @()
+					}
+					# Store the SID if available, otherwise the account name
+					$accountsToRemove[$issue.RightName] += if ($issue.AssignedToSID) { $issue.AssignedToSID } else { $issue.AssignedTo }
+					$modificationsNeeded = $true
+					Write-Host "    Marked for removal." -ForegroundColor Green
+				} else {
+					Write-Host "    Keeping assignment."
+				}
+				Write-Host ""
+			}
+			
+			# Apply removals if any were marked
+			if ($modificationsNeeded) {
+				Write-Host "Applying User Rights Assignment changes..."
+				
+				# Re-read the content to modify
+				$content = Get-Content "$env:TEMP\secpol_rights.cfg"
+				$newContent = @()
+				$inPrivilegeSection = $false
+				
+				foreach ($line in $content) {
+					if ($line -match "^\[Privilege Rights\]") {
+						$inPrivilegeSection = $true
+						$newContent += $line
+						continue
+					}
+					
+					if ($line -match "^\[.*\]" -and $line -notmatch "^\[Privilege Rights\]") {
+						$inPrivilegeSection = $false
+					}
+					
+					if ($inPrivilegeSection -and $line -match "^(\w+)\s*=\s*(.+)") {
+						$rightName = $matches[1]
+						$assignedTo = $matches[2]
+						
+						if ($accountsToRemove.ContainsKey($rightName)) {
+							# Remove specified accounts from this right
+							$accounts = $assignedTo -split ',' | ForEach-Object { $_.Trim() }
+							$accountsToRemoveList = $accountsToRemove[$rightName]
+							
+							$remainingAccounts = $accounts | Where-Object { 
+								$account = $_
+								$keep = $true
+								foreach ($toRemove in $accountsToRemoveList) {
+									if ($account -eq $toRemove) {
+										$keep = $false
+										break
+									}
+								}
+								$keep
+							}
+							
+							if ($remainingAccounts.Count -gt 0) {
+								$newContent += "$rightName = $($remainingAccounts -join ',')"
+							} else {
+								# If no accounts remain, comment out or skip the line
+								$newContent += "; $line"
+							}
+						} else {
+							$newContent += $line
+						}
+					} else {
+						$newContent += $line
+					}
+				}
+				
+				# Save settings
+				$newContent | Set-Content "$env:TEMP\secpol_rights_modified.cfg"
+				
+				# Apply the modified security policy
+				Write-Host "Importing modified security policy..."
+				secedit /configure /db secedit.sdb /cfg "$env:TEMP\secpol_rights_modified.cfg" /areas USER_RIGHTS /quiet | Out-Null
+				
+				if ($LASTEXITCODE -eq 0) {
+					Write-Host "User Rights Assignments updated successfully." -ForegroundColor Green
+				} else {
+					Write-Host "Warning: Security policy import may have encountered issues. Exit code: $LASTEXITCODE" -ForegroundColor Yellow
+				}
+				
+				Remove-Item "$env:TEMP\secpol_rights_modified.cfg" -ErrorAction SilentlyContinue
+			} else {
+				Write-Host "No changes were made to User Rights Assignments."
+			}
+			
+		} else {
+			Write-Host "No suspicious individual user assignments found in User Rights." -ForegroundColor Green
+		}
+		
+		Remove-Item "$env:TEMP\secpol_rights.cfg" -ErrorAction SilentlyContinue
+	} catch {
+		Write-Host "Failed to check User Rights Assignments. Error: $_"
+		Remove-Item "$env:TEMP\secpol_rights.cfg" -ErrorAction SilentlyContinue
+		Remove-Item "$env:TEMP\secpol_rights_modified.cfg" -ErrorAction SilentlyContinue
+	}
+}
+Check-UserRightsAssignment
