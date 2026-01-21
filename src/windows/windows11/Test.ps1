@@ -201,8 +201,8 @@ function Set-AuditPolicy {
     Remove-Item "$env:TEMP\secpol.cfg" -ErrorAction SilentlyContinue
     Remove-Item "$env:TEMP\secpol_modified.cfg" -ErrorAction SilentlyContinue
 	
-	auditpol /set /category:"*" /success:enable
-	auditpol /set /category:"*" /failure:enable
+	auditpol /set /category:"*" /success:enable | Out-Null
+	auditpol /set /category:"*" /failure:enable | Out-Null
 	
 	Write-Host "Audit policy configured successfully."
 }
@@ -227,14 +227,14 @@ function Set-FirewallPolicy {
             "y" {
                 try {
                     # Enable firewall for all profiles
-                    netsh advfirewall set allprofiles state on
+                    netsh advfirewall set allprofiles state on | Out-Null
                     
                     # Ensure Windows Firewall service is running
                     $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
                     if ($service.Status -ne "Running") {
                         Write-Host "Starting Windows Firewall service..."
-                        sc.exe config mpssvc start= auto
-                        net start mpssvc
+                        sc.exe config mpssvc start= auto | Out-Null
+                        net start mpssvc | Out-Null
                     }
                     
                     Write-Host "Firewall enabled successfully for all profiles."
