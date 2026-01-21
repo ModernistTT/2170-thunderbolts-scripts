@@ -270,10 +270,6 @@ function Set-FirewallPolicy {
 		$privateProfile = (Get-NetFirewallProfile -Name Private).Enabled
 		$publicProfile = (Get-NetFirewallProfile -Name Public).Enabled
 		
-		Write-Host "Domain Profile: $(if($domainProfile){'Enabled'}else{'Disabled'})"
-		Write-Host "Private Profile: $(if($privateProfile){'Enabled'}else{'Disabled'})"
-		Write-Host "Public Profile: $(if($publicProfile){'Enabled'}else{'Disabled'})"
-		
 		# Check if any profile is disabled
 		if (-not $domainProfile -or -not $privateProfile -or -not $publicProfile) {
 			do {
