@@ -10,9 +10,9 @@ Description 	-
 
 "
 
-# Constants
-# --------------------------------------------------------------------------------------------------
 
+
+#-------------------------------------- CONSTANTS --------------------------------------#
 # Users:
 $DEFAULTUSERS = @("Administrator","Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
 $DEFAULTPASSWORD = "P@ssword123"
@@ -25,7 +25,10 @@ $MINPWAGE = 10
 $PWHIST = 10
 
 
+
+#-------------------------------------- BEGIN CONFIG --------------------------------------#
 Write-Host $msg
+
 Write-Host "Before executing the following script, please create a .txt file named 'users.txt', containing all of the AUTHORIZED users. You may also add authorized users who need to be added to the PC."
 $path = Read-Host "Please enter the file path to users.txt (include the filename)"
 
@@ -178,9 +181,85 @@ Set-PasswordPolicy
 
 # Audit Policies 
 function Set-AuditPolicy {
+	secedit /export /cfg "$env:TEMP\secpol.cfg" | Out-Null
+    $content = Get-Content "$env:TEMP\secpol.cfg"
+    
+    # Modify audit settings (0=None, 1=Success, 2=Failure, 3=Both)
+    $content = $content -replace "AuditAccountLogon = .*", "AuditAccountLogon = 3"
+    $content = $content -replace "AuditAccountManage = .*", "AuditAccountManage = 3"
+    $content = $content -replace "AuditDSAccess = .*", "AuditDSAccess = 3"
+    $content = $content -replace "AuditLogonEvents = .*", "AuditLogonEvents = 3"
+    $content = $content -replace "AuditObjectAccess = .*", "AuditObjectAccess = 3"
+    $content = $content -replace "AuditPolicyChange = .*", "AuditPolicyChange = 3"
+    $content = $content -replace "AuditPrivilegeUse = .*", "AuditPrivilegeUse = 3"
+    $content = $content -replace "AuditProcessTracking = .*", "AuditProcessTracking = 3"
+    $content = $content -replace "AuditSystemEvents = .*", "AuditSystemEvents = 3"
+    
+    $content | Set-Content "$env:TEMP\secpol_modified.cfg"
+    secedit /configure /db secedit.sdb /cfg "$env:TEMP\secpol_modified.cfg" /areas SECURITYPOLICY | Out-Null
+    
+    Remove-Item "$env:TEMP\secpol.cfg" -ErrorAction SilentlyContinue
+    Remove-Item "$env:TEMP\secpol_modified.cfg" -ErrorAction SilentlyContinue
+	
 	auditpol /set /category:"*" /success:enable
 	auditpol /set /category:"*" /failure:enable
 	
-	
+	Write-Host "Audit policy configured successfully."
 }
+Set-AuditPolicy
 
+function Set-FirewallPolicy {
+    # Get firewall status for all profiles
+    $domainProfile = (Get-NetFirewallProfile -Name Domain).Enabled
+    $privateProfile = (Get-NetFirewallProfile -Name Private).Enabled
+    $publicProfile = (Get-NetFirewallProfile -Name Public).Enabled
+    
+    Write-Host "Domain Profile: $(if($domainProfile){'Enabled'}else{'Disabled'})"
+    Write-Host "Private Profile: $(if($privateProfile){'Enabled'}else{'Disabled'})"
+    Write-Host "Public Profile: $(if($publicProfile){'Enabled'}else{'Disabled'})"
+    
+    # Check if any profile is disabled
+    if (-not $domainProfile -or -not $privateProfile -or -not $publicProfile) {
+        $answer = Read-Host "`nOne or more firewall profiles are disabled. Enable all profiles? Y/N"
+        $answer = $answer.ToLower()
+        
+        switch ($answer) {
+            "y" {
+                try {
+                    # Enable firewall for all profiles
+                    netsh advfirewall set allprofiles state on
+                    
+                    # Ensure Windows Firewall service is running
+                    $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
+                    if ($service.Status -ne "Running") {
+                        Write-Host "Starting Windows Firewall service..."
+                        sc.exe config mpssvc start= auto
+                        net start mpssvc
+                    }
+                    
+                    Write-Host "Firewall enabled successfully for all profiles."
+                } catch {
+                    Write-Host "Failed to enable firewall. Error: $_"
+                }
+                break
+            }
+            "n" {
+                Write-Host "Firewall will remain in current state."
+                break
+            }
+            default {
+                Write-Host "Please input a valid answer!"
+            }
+        }
+    } else {
+        Write-Host "`nAll firewall profiles are already enabled."
+    }
+    
+    # Verify Windows Firewall service status
+    $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
+    if ($service) {
+        Write-Host "Windows Firewall Service Status: $($service.Status)"
+        Write-Host "Windows Firewall Service Startup Type: $($service.StartType)"
+    }
+}
+Set-FirewallPolicy
