@@ -263,7 +263,7 @@ function Configure-Administrators {
 			}
 		}
 	}
-	Write_host "Administrator configuration complete."
+	Write-Host "Administrator configuration complete."
 }
 Configure-Administrators
 
