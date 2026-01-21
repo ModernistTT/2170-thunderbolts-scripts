@@ -110,10 +110,52 @@ if ($answer -eq "y") {
 	if ($path -eq ("cancel")) {
 		break
 	}
+	try {
+		secedit /export /cfg "$env:TEMP\secpol_check.cfg" /quiet | Out-Null
+		$administrators = Get-Content -Path $path
+		$localadministrators = Get-LocalGroupMember -Group "Administrators" | ForEach-Object { 
+			($_).Name -split '\\' | Select-Object -Last 1
+		}
 	
-	$administrators = Get-Content -Path $path
-	$localadministrators = Get-LocalGroupMember -Group "Administrators" | ForEach-Object { 
-		($_).Name -split '\\' | Select-Object -Last 1
+		if (Test-Path "$env:TEMP\secpol_check.cfg") {
+			$content = Get-Content "$env:TEMP\secpol_check.cfg"
+			$adminNameLine = $content | Where-Object { $_ -match "NewAdministratorName" }
+	
+			if ($adminNameLine -and $adminNameLine -match 'NewAdministratorName\s*=\s*"(.+)"') {
+				$currentAdminName = $matches[1]
+	
+				if ($currentAdminName -ne "Administrator") {
+					Write-Host "WARNING - The built-in Administrator account has been renamed to '$currentAdminName'"
+					do {
+						$answer = Read-Host "Would you like to rename it back to 'Administrator'? Y/N"
+						$answer = $answer.ToLower()
+						
+						if ($answer -ne "y" -and $answer -ne "n") {
+							Write-Host "Please input a valid answer (Y/N)!"
+						}
+					} while ($answer -ne "y" -and $answer -ne "n")
+					
+					if ($answer -eq "y") {
+						try {
+							Rename-LocalUser -Name $currentAdminName -NewName "Administrator"
+							Write-Host "Administrator account renamed successfully."
+							$DEFAULTUSERS = @("Administrator","Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
+						} catch {
+							Write-Host "Failed to rename Administrator account. Error: $_"
+							Write-Host "Updating default users list to use '$currentAdminName' instead."
+							$DEFAULTUSERS = @($currentAdminName,"Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
+						}
+					} else {
+						Write-Host "Administrator account will remain as '$currentAdminName'."
+						Write-Host "Updating checks to use '$currentAdminName' instead of 'Administrator'."
+						$DEFAULTUSERS = @($currentAdminName,"Guest","DefaultAccount","defaultuser0","WDAGUtilityAccount")
+					}
+				}
+			}
+			Remove-Item "$env:TEMP\secpol_check.cfg" -ErrorAction SilentlyContinue
+		}
+	} catch {
+		Write-Host "WARNING - Could not check Administrator account name!"
 	}
 	
 	Write-Host "Verifying all authorized Administrators have privileges..."
@@ -255,6 +297,12 @@ function Set-PasswordPolicy {
 	Write-Host "Password policy configured successfully."
 }
 Set-PasswordPolicy
+
+# Lockout Policies
+function Set-LockoutPolicy {
+	
+}
+Set-LockoutPolicy
 
 # Audit Policies 
 function Set-AuditPolicy {
