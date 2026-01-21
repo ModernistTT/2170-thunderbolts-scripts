@@ -167,6 +167,64 @@ if ($answer -eq "y") {
 # Check for passwords
 # TBA 
 
+function Set-FirewallPolicy {
+    # Get firewall status for all profiles
+    $domainProfile = (Get-NetFirewallProfile -Name Domain).Enabled
+    $privateProfile = (Get-NetFirewallProfile -Name Private).Enabled
+    $publicProfile = (Get-NetFirewallProfile -Name Public).Enabled
+    
+    Write-Host "Domain Profile: $(if($domainProfile){'Enabled'}else{'Disabled'})"
+    Write-Host "Private Profile: $(if($privateProfile){'Enabled'}else{'Disabled'})"
+    Write-Host "Public Profile: $(if($publicProfile){'Enabled'}else{'Disabled'})"
+    
+    # Check if any profile is disabled
+    if (-not $domainProfile -or -not $privateProfile -or -not $publicProfile) {
+        $answer = Read-Host "`nOne or more firewall profiles are disabled. Enable all profiles? Y/N"
+        $answer = $answer.ToLower()
+        
+        switch ($answer) {
+            "y" {
+                try {
+                    # Configure Windows Firewall service to start automatically
+                    Write-Host "Configuring Windows Firewall service..."
+                    sc.exe config mpssvc start= auto | Out-Null
+                    
+                    # Start the service if not running
+                    $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
+                    if ($service.Status -ne "Running") {
+                        Write-Host "Starting Windows Firewall service..."
+                        Start-Service -Name "mpssvc" -ErrorAction SilentlyContinue | Out-Null
+                    }
+                    
+                    # Enable firewall for all profiles
+                    netsh advfirewall set allprofiles state on | Out-Null
+                    
+                    Write-Host "Firewall enabled successfully for all profiles."
+                } catch {
+                    Write-Host "Failed to enable firewall. Error: $_"
+                }
+                break
+            }
+            "n" {
+                Write-Host "Firewall will remain in current state."
+                break
+            }
+            default {
+                Write-Host "Please input a valid answer!"
+            }
+        }
+    } else {
+        Write-Host "`nAll firewall profiles are already enabled."
+        
+        sc.exe config mpssvc start= auto | Out-Null
+        $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
+        if ($service.Status -ne "Running") {
+            Start-Service -Name "mpssvc" -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+}
+Set-FirewallPolicy
+
 # Security Policies
 function Set-PasswordPolicy {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "MinimumPasswordLength" -Value $MINPWLEN
@@ -207,59 +265,3 @@ function Set-AuditPolicy {
 	Write-Host "Audit policy configured successfully."
 }
 Set-AuditPolicy
-
-function Set-FirewallPolicy {
-    # Get firewall status for all profiles
-    $domainProfile = (Get-NetFirewallProfile -Name Domain).Enabled
-    $privateProfile = (Get-NetFirewallProfile -Name Private).Enabled
-    $publicProfile = (Get-NetFirewallProfile -Name Public).Enabled
-    
-    Write-Host "Domain Profile: $(if($domainProfile){'Enabled'}else{'Disabled'})"
-    Write-Host "Private Profile: $(if($privateProfile){'Enabled'}else{'Disabled'})"
-    Write-Host "Public Profile: $(if($publicProfile){'Enabled'}else{'Disabled'})"
-    
-    # Check if any profile is disabled
-    if (-not $domainProfile -or -not $privateProfile -or -not $publicProfile) {
-        $answer = Read-Host "`nOne or more firewall profiles are disabled. Enable all profiles? Y/N"
-        $answer = $answer.ToLower()
-        
-        switch ($answer) {
-            "y" {
-                try {
-                    # Enable firewall for all profiles
-                    netsh advfirewall set allprofiles state on | Out-Null
-                    
-                    # Ensure Windows Firewall service is running
-                    $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
-                    if ($service.Status -ne "Running") {
-                        Write-Host "Starting Windows Firewall service..."
-                        sc.exe config mpssvc start= auto | Out-Null
-                        net start mpssvc | Out-Null
-                    }
-                    
-                    Write-Host "Firewall enabled successfully for all profiles."
-                } catch {
-                    Write-Host "Failed to enable firewall. Error: $_"
-                }
-                break
-            }
-            "n" {
-                Write-Host "Firewall will remain in current state."
-                break
-            }
-            default {
-                Write-Host "Please input a valid answer!"
-            }
-        }
-    } else {
-        Write-Host "`nAll firewall profiles are already enabled."
-    }
-    
-    # Verify Windows Firewall service status
-    $service = Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue
-    if ($service) {
-        Write-Host "Windows Firewall Service Status: $($service.Status)"
-        Write-Host "Windows Firewall Service Startup Type: $($service.StartType)"
-    }
-}
-Set-FirewallPolicy
