@@ -683,6 +683,214 @@ function Check-UserRightsAssignment {
 }
 Check-UserRightsAssignment
 
+function Set-SecurityOptions {
+	try {
+		Write-Host "`nConfiguring advanced security options..."
+		
+		# Export current security policy
+		secedit /export /cfg "$env:TEMP\secpol_options.cfg" /quiet | Out-Null
+		
+		if (-not (Test-Path "$env:TEMP\secpol_options.cfg")) {
+			throw "Failed to export security policy"
+		}
+		
+		$content = Get-Content "$env:TEMP\secpol_options.cfg"
+		
+		# Accounts
+		$content = $content -replace "EnableAdminAccount = .*", "EnableAdminAccount = 0"
+		$content = $content -replace "EnableGuestAccount = .*", "EnableGuestAccount = 0"
+		
+		# Interactive Logon
+		$content = $content -replace "DontDisplayLastUserName = .*", "DontDisplayLastUserName = 1"
+		$content = $content -replace "CachedLogonsCount = .*", "CachedLogonsCount = 0"
+		$content = $content -replace "InactivityTimeoutSecs = .*", "InactivityTimeoutSecs = 900"
+		$content = $content -replace "DisableCAD = .*", "DisableCAD = 0"
+		
+		# Network Security - LAN Manager Authentication Level
+		# 5 = Send NTLMv2 response only. Refuse LM & NTLM
+		$content = $content -replace "LmCompatibilityLevel = .*", "LmCompatibilityLevel = 5"
+		
+		# Network Security - LDAP Client Signing
+		# 2 = Require signing
+		$content = $content -replace "LDAPClientIntegrity = .*", "LDAPClientIntegrity = 2"
+		
+		# Recovery Console
+		$content = $content -replace "RecoveryConsoleSecurityLevel = .*", "RecoveryConsoleSecurityLevel = 0"
+		
+		# Save modified content
+		$content | Set-Content "$env:TEMP\secpol_options_modified.cfg"
+		
+		# Apply the modified policy
+		secedit /configure /db secedit.sdb /cfg "$env:TEMP\secpol_options_modified.cfg" /areas SECURITYPOLICY /quiet | Out-Null
+		
+		# Clean up secedit files
+		Remove-Item "$env:TEMP\secpol_options.cfg" -ErrorAction SilentlyContinue
+		Remove-Item "$env:TEMP\secpol_options_modified.cfg" -ErrorAction SilentlyContinue
+		
+		# Registry-based settings that aren't in secedit
+		Write-Host "Configuring registry-based security options..."
+		
+		# Accounts: Block Microsoft Accounts
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "NoConnectedUser" -Value 3 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Accounts: Limit local account use of blank passwords to console logon only
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LimitBlankPasswordUse" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Devices: Allow undock without having to log on
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "UndockWithoutLogon" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Devices: Allowed to format and eject removable media (Administrators only)
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AllocateDASD" -Value "0" -Type String -ErrorAction SilentlyContinue
+		
+		# Devices: Prevent users from installing printer drivers
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers" -Name "AddPrinterDrivers" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Devices: Restrict CD-ROM access to locally logged-on user only
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AllocateCDRoms" -Value "1" -Type String -ErrorAction SilentlyContinue
+		
+		# Devices: Restrict floppy access to locally logged-on user only
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AllocateFloppies" -Value "1" -Type String -ErrorAction SilentlyContinue
+		
+		# Domain Members: Digitally encrypt or sign secure channel data (always)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "RequireSignOrSeal" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "SealSecureChannel" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "SignSecureChannel" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Display user information when the session is locked
+		# 3 = Do not display user information
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "DontDisplayLockedUserId" -Value 3 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Do not display last user name
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "DontDisplayLastUserName" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Do not display username at sign-in
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "DontDisplayUserName" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Do not require CTRL+ALT+DEL (DISABLED means require it)
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "DisableCAD" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Machine account lockout threshold
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "MaxDevicePasswordFailedAttempts" -Value 5 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Machine inactivity limit (900 seconds = 15 minutes)
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "InactivityTimeoutSecs" -Value 900 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Interactive Logon: Message text for users attempting to log on
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LegalNoticeText" -Value "Authorized Users ONLY" -Type String -ErrorAction SilentlyContinue
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "LegalNoticeCaption" -Value "WARNING" -Type String -ErrorAction SilentlyContinue
+		
+		# Microsoft network client: Digitally sign communications (always)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "RequireSecuritySignature" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Microsoft network client: Send unencrypted password to third-party SMB servers
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "EnablePlainTextPassword" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Access: Do not allow anonymous enumeration of SAM accounts
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RestrictAnonymousSAM" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Access: Do not allow storage of passwords and credentials
+		if (-not (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa")) {
+			New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Force | Out-Null
+		}
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "DisableDomainCreds" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Access: Remotely accessible registry paths (empty)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedExactPaths" -Name "Machine" -Value @() -Type MultiString -ErrorAction SilentlyContinue
+		
+		# Network Access: Remotely accessible registry paths and sub-paths (empty)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedPaths" -Name "Machine" -Value @() -Type MultiString -ErrorAction SilentlyContinue
+		
+		# Network Access: Shares that can be accessed anonymously (blank)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -Name "NullSessionShares" -Value @() -Type MultiString -ErrorAction SilentlyContinue
+		
+		# Network Security: Allow Local System to use computer identity for NTLM
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "UseMachineId" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: Allow LocalSystem NULL session fallback
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "AllowNullSessionFallback" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: Allow PKU2U authentication requests
+		if (-not (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u")) {
+			New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u" -Force | Out-Null
+		}
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u" -Name "AllowOnlineID" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: Configure encryption types allowed for Kerberos
+		# 0x18 = AES128_HMAC_SHA1 (0x8) + AES256_HMAC_SHA1 (0x10)
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters" -Name "SupportedEncryptionTypes" -Value 0x18 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: LAN Manager authentication level
+		# 5 = Send NTLMv2 response only. Refuse LM & NTLM
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LmCompatibilityLevel" -Value 5 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: LDAP client signing requirements
+		# 2 = Require signing
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LDAP" -Name "LDAPClientIntegrity" -Value 2 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: Minimum session security for NTLM SSP
+		# 0x20080000 = Require NTLMv2 session security + Require 128-bit encryption
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinClientSec" -Value 0x20080000 -Type DWord -ErrorAction SilentlyContinue
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "NTLMMinServerSec" -Value 0x20080000 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Network Security: Restrict NTLM settings
+		if (-not (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0")) {
+			New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Force | Out-Null
+		}
+		
+		# Restrict NTLM: Add remote server exceptions (blank)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "ClientAllowedNTLMServers" -Value @() -Type MultiString -ErrorAction SilentlyContinue
+		
+		# Restrict NTLM: Add server exceptions in this domain (blank)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "DCAllowedNTLMServers" -Value @() -Type MultiString -ErrorAction SilentlyContinue
+		
+		# Restrict NTLM: Audit Incoming NTLM Traffic (Enable auditing for all accounts)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "AuditReceivingNTLMTraffic" -Value 2 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Restrict NTLM: Audit NTLM authentication in this domain (Enable all)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "AuditNTLMInDomain" -Value 7 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Restrict NTLM: Incoming NTLM traffic (Deny all accounts)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "RestrictReceivingNTLMTraffic" -Value 2 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Restrict NTLM: NTLM authentication in this domain (Deny all)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters" -Name "RestrictNTLMInDomain" -Value 7 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Restrict NTLM: Outgoing NTLM traffic to remote servers (Deny all)
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "RestrictSendingNTLMTraffic" -Value 2 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Recovery Console: Allow automatic administrative logon
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Setup\RecoveryConsole" -Name "SecurityLevel" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+		
+		# Shutdown: Clear virtual memory pagefile
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "ClearPageFileAtShutdown" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# System cryptography: Force strong key protection for user keys
+		# 2 = User must enter a password each time they use a key
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Cryptography" -Name "ForceKeyProtection" -Value 2 -Type DWord -ErrorAction SilentlyContinue
+		
+		# System cryptography: Use FIPS compliant algorithms
+		Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy" -Name "Enabled" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# User Account Control: Admin Approval Mode for the Built-in Administrator account
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "FilterAdministratorToken" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# UAC: Behavior of the elevation prompt for administrators in Admin Approval Mode
+		# 1 = Prompt for credentials on the secure desktop
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "ConsentPromptBehaviorAdmin" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		# User Account Control: Run all administrators in Admin Approval Mode
+		Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableLUA" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+		
+		Write-Host "Advanced security options configured successfully." -ForegroundColor Green
+		
+	} catch {
+		Write-Host "Failed to configure advanced security options. Error: $_" -ForegroundColor Red
+		Remove-Item "$env:TEMP\secpol_options.cfg" -ErrorAction SilentlyContinue
+		Remove-Item "$env:TEMP\secpol_options_modified.cfg" -ErrorAction SilentlyContinue
+	}
+}
+Set-SecurityOptions
+
 Write-Host "`n==============================================================================="
 Write-Host "Script execution completed!"
 Write-Host "==============================================================================="
